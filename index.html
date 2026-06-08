@@ -74,7 +74,7 @@ h2{font-family:'Archivo Black',sans-serif;font-size:16px;font-weight:900;letter-
 .ex-vol b{font-family:'Archivo Black',sans-serif;font-size:14px;}
 
 label.field{display:block;margin-bottom:14px;}
-select,input[type=date]{width:100%;height:48px;padding:0 12px;border:3px solid var(--black);border-radius:0;background:var(--paper);color:var(--black);font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:500;outline:none;-webkit-appearance:none;appearance:none;line-height:1.2;}
+select,input[type=date],input[type=time],input[type=text]{width:100%;height:48px;padding:0 12px;border:3px solid var(--black);border-radius:0;background:var(--paper);color:var(--black);font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:500;outline:none;-webkit-appearance:none;appearance:none;line-height:1.2;}
 select:focus,input:focus{background:var(--yellow);}
 
 .rec{border:3px solid var(--black);padding:12px;margin-bottom:12px;box-shadow:3px 3px 0 var(--black);}
@@ -263,10 +263,13 @@ const SEED = [
    ex:{bench:{w:16,r:[2,2,2]}, row:{w:8,r:[10,10,10]}, squat:{w:20,r:[20,20,20]}, side:{w:null,r:[null,null,null]}, curl:{w:8,r:[5,5,4]}, tri:{w:8,r:[16,13,12]}}, memo:'DOMS'},
   {id:3, date:'2026-06-07', start:'20:19', end:'20:38',
    ex:{bench:{w:16,r:[10,7,5]}, row:{w:null,r:[null,null,null]}, squat:{w:32,r:[25,26,22]}, side:{w:null,r:[null,null,null]}, curl:{w:null,r:[null,null,null]}, tri:{w:null,r:[null,null,null]}}, memo:''},
+  {id:4, date:'2026-06-08', start:null, end:null,
+   ex:{bench:{w:16,r:[11,10,7]}, row:{w:8,r:[16,11,10]}, squat:{w:32,r:[25,25,24]}, side:{w:8,r:[7,3,3]}, curl:{w:8,r:[10,8,7]}, tri:{w:8,r:[22,15,12]}}, memo:''},
 ];
 
 let records = [];
 let cur;
+let editingId=null;
 function load(){ try{ const s=localStorage.getItem(KEY); records = s ? JSON.parse(s) : JSON.parse(JSON.stringify(SEED)); }catch(e){ records = JSON.parse(JSON.stringify(SEED)); } }
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(records)); }catch(e){} }
 
@@ -413,17 +416,7 @@ function renderExInputs(){
 }
 function refreshEx(k){
   const c=cur.ex[k];
-  // set2まで入力済みなら set3 を自動入力（残り回数）
-  if(c.touched[1] && !c.touched[2]){
-    const T=totalTarget(k,c.w);
-    if(T!=null){
-      const rem=clampRep(Math.max(T-(c.r[0]||0)-(c.r[1]||0),0));
-      c.r[2]=rem;
-      const sel3=document.querySelector('select[data-k="'+k+'"][data-f="2"]');
-      if(sel3) sel3.value=rem;
-    }
-  }
-  // ヒント表示
+  // ヒント表示（set1〜3すべて薄い目安のみ。実値は入れない）
   const h=hintFor(k);
   for(let i=0;i<3;i++){ const sp=document.getElementById('hint-'+k+'-'+i); if(sp) sp.textContent = h[i]!=null ? '→'+h[i] : ''; }
   // VOL
@@ -434,6 +427,7 @@ function refreshEx(k){
 document.getElementById('btnSave').onclick=()=>{
   const any = EX.some(e=>cur.ex[e.k].w!=null);
   if(!any){ toast('NO SETS ENTERED'); return; }
+  if(cur.start && !cur.end) cur.end=nowHM(); // SAVEでフィニッシュも兼ねる
   records.push({ id:Date.now(), date:cur.date, start:cur.start, end:cur.end, ex:cleanEx(cur.ex), memo:cur.memo });
   save(); toast('SAVED');
   cur=freshCur();
@@ -445,8 +439,14 @@ function renderHistory(){
   const wrap=document.getElementById('history'); wrap.innerHTML='';
   if(!records.length){ wrap.innerHTML='<p style="color:var(--text-secondary);font-size:13px">No records yet.</p>'; return; }
   [...records].reverse().forEach(rec=>{
-    const dur=durationMin(rec.start,rec.end);
     const div=document.createElement('div'); div.className='rec';
+    if(editingId===rec.id){
+      div.innerHTML=editFormHtml(rec);
+      div.querySelector('#edit-save').onclick=()=>saveEdit(rec.id);
+      div.querySelector('#edit-cancel').onclick=()=>{ editingId=null; renderHistory(); };
+      wrap.appendChild(div); return;
+    }
+    const dur=durationMin(rec.start,rec.end);
     let lines='';
     EX.forEach(e=>{ const ee=rec.ex&&rec.ex[e.k]; const v=vol(ee); if(ee&&ee.w!=null){
       const rs=(ee.r||[]).map(x=>x==null?'-':x).join('/');
@@ -456,10 +456,48 @@ function renderHistory(){
       '<div class="rec-top"><span class="rec-date">'+fmtMD(rec.date)+'</span>'+
       '<span class="rec-meta">'+(rec.start||'--')+'–'+(rec.end||'--')+(dur!=null?' / '+dur+'min':'')+'</span></div>'+
       lines + (rec.memo?'<div class="rec-meta" style="margin-top:6px">NOTE: '+rec.memo+'</div>':'')+
-      '<button class="btn small danger" style="margin-top:10px" data-id="'+rec.id+'">DELETE</button>';
-    div.querySelector('button').onclick=()=>{ if(confirm('Delete this record?')){ records=records.filter(r=>r.id!==rec.id); save(); renderHistory(); } };
+      '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn small" data-edit="'+rec.id+'">EDIT</button><button class="btn small danger" data-del="'+rec.id+'">DELETE</button></div>';
+    div.querySelector('[data-edit]').onclick=()=>{ editingId=rec.id; renderHistory(); };
+    div.querySelector('[data-del]').onclick=()=>{ if(confirm('Delete this record?')){ records=records.filter(r=>r.id!==rec.id); save(); renderHistory(); } };
     wrap.appendChild(div);
   });
+}
+function editFormHtml(rec){
+  let ex='';
+  EX.forEach(e=>{
+    const ee=(rec.ex&&rec.ex[e.k])||{w:null,r:[null,null,null]};
+    const r=ee.r||[null,null,null];
+    ex+='<div class="ex-block"><div class="ex-head" style="background:'+e.color+'"><span>'+e.name+'</span></div>'+
+      '<div class="ex-body">'+
+      '<div><span class="mini-label">Weight</span><select id="edit-'+e.k+'-w">'+optionTags(WEIGHTS,ee.w,'-')+'</select></div>'+
+      '<div><span class="mini-label">Set 1</span><select id="edit-'+e.k+'-0">'+optionTags(REPS,r[0],'-')+'</select></div>'+
+      '<div><span class="mini-label">Set 2</span><select id="edit-'+e.k+'-1">'+optionTags(REPS,r[1],'-')+'</select></div>'+
+      '<div><span class="mini-label">Set 3</span><select id="edit-'+e.k+'-2">'+optionTags(REPS,r[2],'-')+'</select></div>'+
+      '</div></div>';
+  });
+  return '<div class="rec-top"><span class="rec-date" style="color:var(--blue)">EDIT</span></div>'+
+    '<span class="mini-label" style="margin-top:4px">DATE</span><input type="date" id="edit-date" value="'+rec.date+'">'+
+    '<div style="display:flex;gap:8px;margin-top:8px"><div style="flex:1"><span class="mini-label">START</span><input type="time" id="edit-start" value="'+(rec.start||'')+'"></div>'+
+    '<div style="flex:1"><span class="mini-label">END</span><input type="time" id="edit-end" value="'+(rec.end||'')+'"></div></div>'+
+    '<div style="margin-top:12px">'+ex+'</div>'+
+    '<span class="mini-label">NOTE</span><input type="text" id="edit-memo" value="'+(rec.memo||'').replace(/"/g,'&quot;')+'" placeholder="memo">'+
+    '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn small success" id="edit-save">SAVE</button><button class="btn small" id="edit-cancel">CANCEL</button></div>';
+}
+function saveEdit(id){
+  const rec=records.find(r=>r.id===id); if(!rec)return;
+  rec.date=document.getElementById('edit-date').value||rec.date;
+  rec.start=document.getElementById('edit-start').value||null;
+  rec.end=document.getElementById('edit-end').value||null;
+  rec.memo=document.getElementById('edit-memo').value||'';
+  rec.ex=rec.ex||{};
+  EX.forEach(e=>{
+    const w=document.getElementById('edit-'+e.k+'-w').value;
+    const r0=document.getElementById('edit-'+e.k+'-0').value;
+    const r1=document.getElementById('edit-'+e.k+'-1').value;
+    const r2=document.getElementById('edit-'+e.k+'-2').value;
+    rec.ex[e.k]={w:w===''?null:Number(w), r:[r0===''?null:Number(r0), r1===''?null:Number(r1), r2===''?null:Number(r2)]};
+  });
+  editingId=null; save(); renderHistory(); renderExInputs(); toast('UPDATED');
 }
 
 /* 推移：ターゲット表 */
@@ -557,4 +595,3 @@ renderTime(); renderTimer(); renderExInputs(); renderHistory(); renderGuide();
 </script>
 </body>
 </html>
-
