@@ -74,7 +74,7 @@ h2{font-family:'Archivo Black',sans-serif;font-size:16px;font-weight:900;letter-
 .ex-vol b{font-family:'Archivo Black',sans-serif;font-size:14px;}
 
 label.field{display:block;margin-bottom:14px;}
-select,input[type=date]{width:100%;height:48px;padding:0 12px;border:3px solid var(--black);border-radius:0;background:var(--paper);color:var(--black);font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:500;outline:none;-webkit-appearance:none;appearance:none;line-height:1.2;}
+select,input[type=date],input[type=time],input[type=text]{width:100%;height:48px;padding:0 12px;border:3px solid var(--black);border-radius:0;background:var(--paper);color:var(--black);font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:500;outline:none;-webkit-appearance:none;appearance:none;line-height:1.2;}
 select:focus,input:focus{background:var(--yellow);}
 
 .rec{border:3px solid var(--black);padding:12px;margin-bottom:12px;box-shadow:3px 3px 0 var(--black);}
@@ -263,10 +263,13 @@ const SEED = [
    ex:{bench:{w:16,r:[2,2,2]}, row:{w:8,r:[10,10,10]}, squat:{w:20,r:[20,20,20]}, side:{w:null,r:[null,null,null]}, curl:{w:8,r:[5,5,4]}, tri:{w:8,r:[16,13,12]}}, memo:'DOMS'},
   {id:3, date:'2026-06-07', start:'20:19', end:'20:38',
    ex:{bench:{w:16,r:[10,7,5]}, row:{w:null,r:[null,null,null]}, squat:{w:32,r:[25,26,22]}, side:{w:null,r:[null,null,null]}, curl:{w:null,r:[null,null,null]}, tri:{w:null,r:[null,null,null]}}, memo:''},
+  {id:4, date:'2026-06-08', start:null, end:null,
+   ex:{bench:{w:16,r:[11,10,7]}, row:{w:8,r:[16,11,10]}, squat:{w:32,r:[25,25,24]}, side:{w:8,r:[7,3,3]}, curl:{w:8,r:[10,8,7]}, tri:{w:8,r:[22,15,12]}}, memo:''},
 ];
 
 let records = [];
 let cur;
+let editingId=null;
 function load(){ try{ const s=localStorage.getItem(KEY); records = s ? JSON.parse(s) : JSON.parse(JSON.stringify(SEED)); }catch(e){ records = JSON.parse(JSON.stringify(SEED)); } }
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(records)); }catch(e){} }
 
@@ -321,239 +324,4 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
 });
 
 let toastT;
-function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('show'),1800); }
-
-/* タイム */
-function renderTime(){
-  document.getElementById('todayLabel').textContent = cur.date + ' (' + DOW[new Date(cur.date).getDay()] + ')';
-  const dur = durationMin(cur.start,cur.end);
-  document.getElementById('timeDisplay').innerHTML =
-    'START <b>'+(cur.start||'--:--')+'</b> &nbsp; END <b>'+(cur.end||'--:--')+'</b> &nbsp; TIME <b>'+(dur!=null?dur+'min':'--')+'</b>';
-}
-document.getElementById('btnStart').onclick=()=>{ cur.start=nowHM(); cur.end=null; renderTime(); toast('START '+cur.start); };
-document.getElementById('btnFinish').onclick=()=>{ if(!cur.start){toast('START FIRST');return;} cur.end=nowHM(); renderTime(); toast('FINISHED '+cur.end); };
-
-/* タイマー */
-let tDur=90, tLeft=90, tId=null;
-function fmtT(s){ return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
-function renderTimer(){ document.getElementById('timerCount').textContent=fmtT(tLeft); }
-document.querySelectorAll('.timer-presets .btn').forEach(b=>b.onclick=()=>{
-  document.querySelectorAll('.timer-presets .btn').forEach(x=>x.classList.remove('sel'));
-  b.classList.add('sel'); tDur=+b.dataset.sec; tLeft=tDur; stopTimer(); renderTimer();
-});
-function tick(){ tLeft--; if(tLeft<=0){ stopTimer(); tLeft=0; renderTimer(); alarm(); return; } renderTimer(); }
-function alarm(){
-  const el=document.getElementById('timerCount'); el.classList.add('flash'); setTimeout(()=>el.classList.remove('flash'),1500);
-  try{ const ctx=new (window.AudioContext||window.webkitAudioContext)();
-    [0,0.25,0.5].forEach(d=>{ const o=ctx.createOscillator(),g=ctx.createGain(); o.connect(g);g.connect(ctx.destination); o.frequency.value=880; g.gain.setValueAtTime(.25,ctx.currentTime+d); g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+d+.2); o.start(ctx.currentTime+d); o.stop(ctx.currentTime+d+.2); });
-  }catch(e){}
-  if(navigator.vibrate) navigator.vibrate([250,120,250]);
-  toast('REST DONE!');
-}
-function startTimer(){ if(tId)return; if(tLeft<=0)tLeft=tDur; tId=setInterval(tick,1000); }
-function stopTimer(){ if(tId){clearInterval(tId);tId=null;} }
-document.getElementById('btnTimerStart').onclick=startTimer;
-document.getElementById('btnTimerPause').onclick=stopTimer;
-document.getElementById('btnTimerReset').onclick=()=>{ stopTimer(); tLeft=tDur; renderTimer(); };
-
-/* ===== 目標到達合計回数（max volを超えるのに必要な3セット合計） ===== */
-function totalTarget(k,w){ const mx=maxVol(k); if(w==null||mx<=0) return null; return Math.floor(mx/w)+1; }
-
-/* ===== セットごとの目標ヒント ===== */
-/* やる前(set1未入力)：T/3を3箇所 / 1set後：(T-r1)/2を2箇所 / 2set後：(T-r1-r2)をset3 */
-function hintFor(k){
-  const c=cur.ex[k]; const T=totalTarget(k,c.w);
-  if(T==null) return [null,null,null];
-  const t=c.touched;
-  if(!t[0]){
-    // 3等分。余りは次にやるset1に上乗せ
-    const q=Math.floor(T/3), rem=T-q*3;
-    return [clampRep(q+rem), clampRep(q), clampRep(q)];
-  } else if(!t[1]){
-    // 残りを2等分。余りは次にやるset2に上乗せ
-    const r1=c.r[0]||0; const R=Math.max(T-r1,0);
-    const q=Math.floor(R/2), rem=R-q*2;
-    return [null, clampRep(q+rem), clampRep(q)];
-  } else {
-    // 残り全部をset3
-    const r1=c.r[0]||0, r2=c.r[1]||0; const R=Math.max(T-r1-r2,0);
-    return [null,null,clampRep(R)];
-  }
-}
-
-/* 入力UI */
-function optionTags(arr,sel,placeholder){
-  let h='<option value="">'+placeholder+'</option>';
-  arr.forEach(v=>{ h+='<option value="'+v+'"'+(String(sel)===String(v)?' selected':'')+'>'+v+'</option>'; });
-  return h;
-}
-function renderExInputs(){
-  const wrap=document.getElementById('exInputs'); wrap.innerHTML='';
-  EX.forEach(e=>{
-    const c=cur.ex[e.k];
-    const blk=document.createElement('div'); blk.className='ex-block';
-    blk.innerHTML =
-      '<div class="ex-head" style="background:'+e.color+'"><span>'+e.name+(c.bumped?' <span style="font-family:DM Mono,monospace;font-size:9px;background:var(--yellow);color:var(--black);padding:1px 5px;letter-spacing:0">↑ +4kg</span>':'')+'</span><span style="font-family:DM Mono,monospace;font-size:9px;opacity:.85">'+e.rep+' reps</span></div>'+
-      '<div class="ex-body">'+
-        '<div><span class="mini-label">Weight</span><select data-k="'+e.k+'" data-f="w">'+optionTags(WEIGHTS,c.w,'-')+'</select></div>'+
-        '<div><span class="mini-label">Set 1<em class="hint" id="hint-'+e.k+'-0"></em></span><select data-k="'+e.k+'" data-f="0">'+optionTags(REPS,c.r[0],'-')+'</select></div>'+
-        '<div><span class="mini-label">Set 2<em class="hint" id="hint-'+e.k+'-1"></em></span><select data-k="'+e.k+'" data-f="1">'+optionTags(REPS,c.r[1],'-')+'</select></div>'+
-        '<div><span class="mini-label">Set 3<em class="hint" id="hint-'+e.k+'-2"></em></span><select data-k="'+e.k+'" data-f="2">'+optionTags(REPS,c.r[2],'-')+'</select></div>'+
-        '<div class="ex-vol" id="vol-'+e.k+'">VOL <b>'+(vol(c)??'-')+'</b></div>'+
-      '</div>';
-    wrap.appendChild(blk);
-  });
-  wrap.querySelectorAll('select').forEach(s=>s.onchange=()=>{
-    const k=s.dataset.k, f=s.dataset.f, v=s.value===''?null:Number(s.value);
-    if(f==='w'){ cur.ex[k].w=v; }
-    else { const i=+f; cur.ex[k].r[i]=v; cur.ex[k].touched[i]=true; }
-    refreshEx(k);
-  });
-  EX.forEach(e=>refreshEx(e.k));
-}
-function refreshEx(k){
-  const c=cur.ex[k];
-  // set2まで入力済みなら set3 を自動入力（残り回数）
-  if(c.touched[1] && !c.touched[2]){
-    const T=totalTarget(k,c.w);
-    if(T!=null){
-      const rem=clampRep(Math.max(T-(c.r[0]||0)-(c.r[1]||0),0));
-      c.r[2]=rem;
-      const sel3=document.querySelector('select[data-k="'+k+'"][data-f="2"]');
-      if(sel3) sel3.value=rem;
-    }
-  }
-  // ヒント表示
-  const h=hintFor(k);
-  for(let i=0;i<3;i++){ const sp=document.getElementById('hint-'+k+'-'+i); if(sp) sp.textContent = h[i]!=null ? '→'+h[i] : ''; }
-  // VOL
-  const vEl=document.getElementById('vol-'+k); if(vEl) vEl.innerHTML='VOL <b>'+(vol(c)??'-')+'</b>';
-}
-
-/* 保存 */
-document.getElementById('btnSave').onclick=()=>{
-  const any = EX.some(e=>cur.ex[e.k].w!=null);
-  if(!any){ toast('NO SETS ENTERED'); return; }
-  records.push({ id:Date.now(), date:cur.date, start:cur.start, end:cur.end, ex:cleanEx(cur.ex), memo:cur.memo });
-  save(); toast('SAVED');
-  cur=freshCur();
-  renderTime(); renderExInputs(); renderHistory();
-};
-
-/* 履歴 */
-function renderHistory(){
-  const wrap=document.getElementById('history'); wrap.innerHTML='';
-  if(!records.length){ wrap.innerHTML='<p style="color:var(--text-secondary);font-size:13px">No records yet.</p>'; return; }
-  [...records].reverse().forEach(rec=>{
-    const dur=durationMin(rec.start,rec.end);
-    const div=document.createElement('div'); div.className='rec';
-    let lines='';
-    EX.forEach(e=>{ const ee=rec.ex&&rec.ex[e.k]; const v=vol(ee); if(ee&&ee.w!=null){
-      const rs=(ee.r||[]).map(x=>x==null?'-':x).join('/');
-      lines+='<div class="rec-line"><span><i class="rec-tag" style="background:'+e.color+'"></i>'+e.short+'</span><span>'+ee.w+'kg × '+rs+' = '+(v??'-')+'</span></div>';
-    }});
-    div.innerHTML =
-      '<div class="rec-top"><span class="rec-date">'+fmtMD(rec.date)+'</span>'+
-      '<span class="rec-meta">'+(rec.start||'--')+'–'+(rec.end||'--')+(dur!=null?' / '+dur+'min':'')+'</span></div>'+
-      lines + (rec.memo?'<div class="rec-meta" style="margin-top:6px">NOTE: '+rec.memo+'</div>':'')+
-      '<button class="btn small danger" style="margin-top:10px" data-id="'+rec.id+'">DELETE</button>';
-    div.querySelector('button').onclick=()=>{ if(confirm('Delete this record?')){ records=records.filter(r=>r.id!==rec.id); save(); renderHistory(); } };
-    wrap.appendChild(div);
-  });
-}
-
-/* 推移：ターゲット表 */
-function latestWeight(k){ return latestEx(k).w; }
-function goalText(mx,w){ if(w==null)return '-'; if(mx<=0)return 'NO DATA'; return (Math.floor(mx/w)+1)+' reps'; }
-function renderTarget(){
-  const tb=document.getElementById('targetBody'); tb.innerHTML='';
-  EX.forEach(e=>{
-    const mx=maxVol(e.k); const lw=latestWeight(e.k);
-    const tr=document.createElement('tr');
-    tr.innerHTML='<td><i class="rec-tag" style="background:'+e.color+'"></i>'+e.short+'</td>'+
-      '<td>'+(mx||'-')+'</td>'+
-      '<td><select data-k="'+e.k+'">'+optionTags(WEIGHTS,lw,'-')+'</select></td>'+
-      '<td class="goal" id="goal-'+e.k+'">'+goalText(mx,lw)+'</td>';
-    tb.appendChild(tr);
-    tr.querySelector('select').onchange=function(){
-      const w=this.value===''?null:Number(this.value);
-      document.getElementById('goal-'+e.k).textContent=goalText(mx,w);
-    };
-  });
-}
-
-/* グラフ */
-function buildSeries(keys){
-  const sorted=[...records].sort((a,b)=>a.date<b.date?-1:1);
-  const labels=sorted.map(r=>fmtMD(r.date));
-  const series=keys.map(k=>{ const e=EX.find(x=>x.k===k); return {color:e.color, name:e.short, pts:sorted.map(r=>vol(r.ex&&r.ex[k]))}; });
-  return {labels, series};
-}
-function drawChart(elId, keys){
-  const {labels,series}=buildSeries(keys);
-  const el=document.getElementById(elId);
-  const n=Math.max(labels.length,1);
-  const W=Math.max(320, n*70+80), H=240, padL=46, padR=18, padT=14, padB=34;
-  let maxY=0; series.forEach(s=>s.pts.forEach(v=>{ if(v!=null&&v>maxY)maxY=v; }));
-  maxY = maxY>0 ? Math.ceil(maxY/100)*100 : 100;
-  const x=i=> n===1 ? padL+(W-padL-padR)/2 : padL + i*(W-padL-padR)/(n-1);
-  const y=v=> padT + (H-padT-padB)*(1 - v/maxY);
-  let svg='<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" font-family="DM Mono, monospace">';
-  for(let g=0;g<=4;g++){ const val=maxY*g/4, yy=y(val);
-    svg+='<line x1="'+padL+'" y1="'+yy+'" x2="'+(W-padR)+'" y2="'+yy+'" stroke="#999" stroke-width="1" stroke-dasharray="2 3"/>';
-    svg+='<text x="'+(padL-6)+'" y="'+(yy+4)+'" font-size="9" text-anchor="end" fill="#1a1a1a">'+val+'</text>';
-  }
-  svg+='<line x1="'+padL+'" y1="'+padT+'" x2="'+padL+'" y2="'+(H-padB)+'" stroke="#1a1a1a" stroke-width="3"/>';
-  svg+='<line x1="'+padL+'" y1="'+(H-padB)+'" x2="'+(W-padR)+'" y2="'+(H-padB)+'" stroke="#1a1a1a" stroke-width="3"/>';
-  labels.forEach((lb,i)=>{ svg+='<text x="'+x(i)+'" y="'+(H-padB+16)+'" font-size="9" text-anchor="middle" fill="#1a1a1a">'+lb+'</text>'; });
-  series.forEach(s=>{
-    let d='', started=false;
-    s.pts.forEach((v,i)=>{ if(v==null)return; d+=(started?'L':'M')+x(i)+' '+y(v)+' '; started=true; });
-    if(d) svg+='<path d="'+d+'" fill="none" stroke="'+s.color+'" stroke-width="3.5" stroke-linejoin="round"/>';
-    s.pts.forEach((v,i)=>{ if(v==null)return; svg+='<circle cx="'+x(i)+'" cy="'+y(v)+'" r="4.5" fill="'+s.color+'" stroke="#1a1a1a" stroke-width="1.5"/>'; });
-  });
-  svg+='</svg>';
-  if(labels.length===0) svg='<p style="color:var(--text-secondary);font-size:12px;padding:20px">No records yet.</p>';
-  el.innerHTML=svg;
-}
-function legend(elId, keys){
-  const el=document.getElementById(elId); el.innerHTML='';
-  keys.forEach(k=>{ const e=EX.find(x=>x.k===k); const s=document.createElement('span'); s.innerHTML='<i style="background:'+e.color+'"></i>'+e.short; el.appendChild(s); });
-}
-function renderCharts(){
-  const upper=EX.filter(e=>e.group==='upper').map(e=>e.k);
-  const leg=EX.filter(e=>e.group==='leg').map(e=>e.k);
-  legend('legendUpper',upper); drawChart('chartUpper',upper);
-  legend('legendLeg',leg); drawChart('chartLeg',leg);
-}
-
-/* ガイド表 */
-function renderGuide(){
-  const tb=document.getElementById('guideBody'); tb.innerHTML='';
-  EX.forEach(e=>{ const tr=document.createElement('tr');
-    tr.innerHTML='<td><i class="rec-tag" style="background:'+e.color+'"></i>'+e.short+'</td><td>'+e.rep+'</td><td style="text-align:left;font-size:11px">'+e.crit+'</td>';
-    tb.appendChild(tr);
-  });
-}
-
-/* データ入出力 */
-document.getElementById('btnExport').onclick=()=>{
-  const blob=new Blob([JSON.stringify(records,null,2)],{type:'application/json'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download='workout_log_'+todayStr()+'.json'; a.click(); toast('EXPORTED');
-};
-document.getElementById('btnImport').onclick=()=>document.getElementById('fileInput').click();
-document.getElementById('fileInput').onchange=function(){
-  const f=this.files[0]; if(!f)return; const rd=new FileReader();
-  rd.onload=()=>{ try{ const d=JSON.parse(rd.result); if(Array.isArray(d)){ records=d; save(); cur=freshCur(); renderTime(); renderExInputs(); renderHistory(); toast('IMPORTED'); } else toast('INVALID FILE'); }catch(e){ toast('IMPORT FAILED'); } };
-  rd.readAsText(f); this.value='';
-};
-document.getElementById('btnClear').onclick=()=>{ if(confirm('Clear all data? Export a backup first.')){ records=[]; save(); cur=freshCur(); renderTime(); renderExInputs(); renderHistory(); toast('CLEARED'); } };
-
-/* 初期化 */
-load();
-cur=freshCur();
-renderTime(); renderTimer(); renderExInputs(); renderHistory(); renderGuide();
-</script>
-</body>
-</html>
+function toast(msg){ const el=document.getElementById('toast'); el.textConten
