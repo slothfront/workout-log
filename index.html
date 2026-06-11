@@ -70,6 +70,8 @@ h2{font-family:'Archivo Black',sans-serif;font-size:16px;font-weight:900;letter-
 .ex-body .mini-label{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:3px;display:block;color:var(--text-secondary);white-space:nowrap;}
 .ex-body .mini-label .hint{color:var(--text-tertiary);font-weight:400;font-style:normal;margin-left:3px;letter-spacing:0;}
 .ex-body select{height:44px;font-size:16px;padding:0 6px;}
+.rep-pair{display:flex;gap:3px;}
+.rep-pair select{flex:1;min-width:0;padding:0 2px;text-align:center;text-align-last:center;}
 .ex-vol{grid-column:1/-1;font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--black);text-align:right;margin-top:2px;}
 .ex-vol b{font-family:'Archivo Black',sans-serif;font-size:14px;}
 
@@ -94,6 +96,9 @@ select:focus,input:focus{background:var(--yellow);}
 .stat-table .goal{font-family:'Archivo Black',sans-serif;color:var(--red);font-size:14px;}
 
 .chart-wrap{overflow-x:auto;border:3px solid var(--black);background:var(--paper);padding:10px;margin-bottom:8px;}
+.chart-period{display:flex;gap:8px;margin-bottom:14px;}
+.chart-period .btn{flex:1;}
+.chart-period .btn.sel{background:var(--blue);color:var(--paper);}
 .chart-title{font-family:'Archivo Black',sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;}
 .legend{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:18px;}
 .legend span{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.04em;display:flex;align-items:center;gap:5px;}
@@ -218,6 +223,11 @@ select:focus,input:focus{background:var(--yellow);}
       <p style="font-size:11px;color:var(--text-secondary);margin-top:10px;line-height:1.5">"Today kg" is preset to your latest weight (editable). It shows the total reps across 3 sets needed to beat your max volume. Big weight changes inflate the number — use it as a rough guide.</p>
     </div>
     <div class="card">
+      <div class="chart-period" id="chartPeriod">
+        <button class="btn small sel" data-period="week">WEEK</button>
+        <button class="btn small" data-period="month">MONTH</button>
+        <button class="btn small" data-period="all">ALL</button>
+      </div>
       <h2>Trend / Upper</h2>
       <div class="legend" id="legendUpper"></div>
       <div class="chart-wrap"><div class="chart-title">Upper body — 5 lifts</div><div id="chartUpper"></div></div>
@@ -305,14 +315,13 @@ function load(){ try{ const s=localStorage.getItem(KEY); records = s ? JSON.pars
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(records)); }catch(e){} }
 
 const WEIGHTS=[]; for(let w=4;w<=32;w+=4) WEIGHTS.push(w);
-const REPS=[]; for(let n=1;n<=30;n++) REPS.push(n);
 function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function nowHM(){ const d=new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 function fmtMD(s){ if(!s) return ''; const p=s.split('-'); return parseInt(p[1])+'/'+parseInt(p[2]); }
 function vol(e){ if(!e||e.w==null) return null; const rs=(e.r||[]).filter(x=>x!=null&&x!==''); if(!rs.length) return null; return e.w*rs.reduce((a,b)=>a+Number(b),0); }
 function maxVol(k){ let m=0; records.forEach(rec=>{ const v=vol(rec.ex&&rec.ex[k]); if(v!=null&&v>m)m=v; }); return m; }
 function durationMin(st,en){ if(!st||!en)return null; const [h1,m1]=st.split(':').map(Number),[h2,m2]=en.split(':').map(Number); let d=(h2*60+m2)-(h1*60+m1); if(d<0)d+=1440; return d; }
-function clampRep(n){ return Math.min(Math.max(Math.round(n),1),30); }
+function clampRep(n){ return Math.min(Math.max(Math.round(n),1),99); }
 
 /* 最新記録の重量＆回数を取得（前回値プリセット用） */
 function latestEx(k){
@@ -449,6 +458,18 @@ function optionTags(arr,sel,placeholder){
   arr.forEach(v=>{ h+='<option value="'+v+'"'+(String(sel)===String(v)?' selected':'')+'>'+v+'</option>'; });
   return h;
 }
+/* 回数2桁入力：10の位(0〜9・既定0)＋1の位(0〜9・未選択=「-」=null)。値=10の位×10+1の位 */
+function repPair(attrsT,attrsO,val){
+  const tens = val!=null ? Math.floor(val/10) : 0;
+  const ones = val!=null ? val%10 : '';
+  let t='<select '+attrsT+'>';
+  for(let d=0;d<=9;d++) t+='<option value="'+d+'"'+(d===tens?' selected':'')+'>'+d+'</option>';
+  t+='</select>';
+  let o='<select '+attrsO+'><option value="">-</option>';
+  for(let d=0;d<=9;d++) o+='<option value="'+d+'"'+(ones!==''&&Number(ones)===d?' selected':'')+'>'+d+'</option>';
+  o+='</select>';
+  return '<div class="rep-pair">'+t+o+'</div>';
+}
 function renderExInputs(){
   const wrap=document.getElementById('exInputs'); wrap.innerHTML='';
   EX.forEach(e=>{
@@ -458,17 +479,24 @@ function renderExInputs(){
       '<div class="ex-head" style="background:'+e.color+'"><span>'+e.name+(c.bumped?' <span style="font-family:DM Mono,monospace;font-size:9px;background:var(--yellow);color:var(--black);padding:1px 5px;letter-spacing:0">↑ +4kg</span>':'')+'</span><span style="font-family:DM Mono,monospace;font-size:9px;opacity:.85">'+e.rep+' reps</span></div>'+
       '<div class="ex-body">'+
         '<div><span class="mini-label">Weight</span><select data-k="'+e.k+'" data-f="w">'+optionTags(WEIGHTS,c.w,'-')+'</select></div>'+
-        '<div><span class="mini-label">Set 1<em class="hint" id="hint-'+e.k+'-0"></em></span><select data-k="'+e.k+'" data-f="0">'+optionTags(REPS,c.r[0],'-')+'</select></div>'+
-        '<div><span class="mini-label">Set 2<em class="hint" id="hint-'+e.k+'-1"></em></span><select data-k="'+e.k+'" data-f="1">'+optionTags(REPS,c.r[1],'-')+'</select></div>'+
-        '<div><span class="mini-label">Set 3<em class="hint" id="hint-'+e.k+'-2"></em></span><select data-k="'+e.k+'" data-f="2">'+optionTags(REPS,c.r[2],'-')+'</select></div>'+
+        '<div><span class="mini-label">Set 1<em class="hint" id="hint-'+e.k+'-0"></em></span>'+repPair('data-k="'+e.k+'" data-f="0" data-d="t"','data-k="'+e.k+'" data-f="0" data-d="o"',c.r[0])+'</div>'+
+        '<div><span class="mini-label">Set 2<em class="hint" id="hint-'+e.k+'-1"></em></span>'+repPair('data-k="'+e.k+'" data-f="1" data-d="t"','data-k="'+e.k+'" data-f="1" data-d="o"',c.r[1])+'</div>'+
+        '<div><span class="mini-label">Set 3<em class="hint" id="hint-'+e.k+'-2"></em></span>'+repPair('data-k="'+e.k+'" data-f="2" data-d="t"','data-k="'+e.k+'" data-f="2" data-d="o"',c.r[2])+'</div>'+
         '<div class="ex-vol" id="vol-'+e.k+'">VOL <b>'+(vol(c)??'-')+'</b></div>'+
       '</div>';
     wrap.appendChild(blk);
   });
   wrap.querySelectorAll('select').forEach(s=>s.onchange=()=>{
-    const k=s.dataset.k, f=s.dataset.f, v=s.value===''?null:Number(s.value);
-    if(f==='w'){ cur.ex[k].w=v; }
-    else { const i=+f; cur.ex[k].r[i]=v; cur.ex[k].touched[i]=true; }
+    const k=s.dataset.k, f=s.dataset.f;
+    if(f==='w'){ cur.ex[k].w = s.value===''?null:Number(s.value); }
+    else {
+      const i=+f;
+      const tsel=wrap.querySelector('select[data-k="'+k+'"][data-f="'+i+'"][data-d="t"]');
+      const osel=wrap.querySelector('select[data-k="'+k+'"][data-f="'+i+'"][data-d="o"]');
+      const ones=osel.value;
+      cur.ex[k].r[i] = ones==='' ? null : (Number(tsel.value)*10+Number(ones));
+      cur.ex[k].touched[i]=true;
+    }
     refreshEx(k);
   });
   EX.forEach(e=>refreshEx(e.k));
@@ -533,9 +561,9 @@ function editFormHtml(rec){
     ex+='<div class="ex-block"><div class="ex-head" style="background:'+e.color+'"><span>'+e.name+'</span></div>'+
       '<div class="ex-body">'+
       '<div><span class="mini-label">Weight</span><select id="edit-'+e.k+'-w">'+optionTags(WEIGHTS,ee.w,'-')+'</select></div>'+
-      '<div><span class="mini-label">Set 1</span><select id="edit-'+e.k+'-0">'+optionTags(REPS,r[0],'-')+'</select></div>'+
-      '<div><span class="mini-label">Set 2</span><select id="edit-'+e.k+'-1">'+optionTags(REPS,r[1],'-')+'</select></div>'+
-      '<div><span class="mini-label">Set 3</span><select id="edit-'+e.k+'-2">'+optionTags(REPS,r[2],'-')+'</select></div>'+
+      '<div><span class="mini-label">Set 1</span>'+repPair('id="edit-'+e.k+'-0-t"','id="edit-'+e.k+'-0-o"',r[0])+'</div>'+
+      '<div><span class="mini-label">Set 2</span>'+repPair('id="edit-'+e.k+'-1-t"','id="edit-'+e.k+'-1-o"',r[1])+'</div>'+
+      '<div><span class="mini-label">Set 3</span>'+repPair('id="edit-'+e.k+'-2-t"','id="edit-'+e.k+'-2-o"',r[2])+'</div>'+
       '</div></div>';
   });
   return '<div class="rec-top"><span class="rec-date" style="color:var(--blue)">EDIT</span></div>'+
@@ -555,10 +583,10 @@ function saveEdit(id){
   rec.ex=rec.ex||{};
   EX.forEach(e=>{
     const w=document.getElementById('edit-'+e.k+'-w').value;
-    const r0=document.getElementById('edit-'+e.k+'-0').value;
-    const r1=document.getElementById('edit-'+e.k+'-1').value;
-    const r2=document.getElementById('edit-'+e.k+'-2').value;
-    rec.ex[e.k]={w:w===''?null:Number(w), r:[r0===''?null:Number(r0), r1===''?null:Number(r1), r2===''?null:Number(r2)]};
+    const rd=i=>{ const o=document.getElementById('edit-'+e.k+'-'+i+'-o').value;
+      if(o==='') return null;
+      return Number(document.getElementById('edit-'+e.k+'-'+i+'-t').value)*10+Number(o); };
+    rec.ex[e.k]={w:w===''?null:Number(w), r:[rd(0),rd(1),rd(2)]};
   });
   editingId=null; save(); renderHistory(); renderExInputs(); toast('UPDATED');
 }
@@ -584,8 +612,16 @@ function renderTarget(){
 }
 
 /* グラフ */
+let chartPeriod='week';   // week=直近7日 / month=直近30日 / all=全期間
+function periodCutoff(){
+  if(chartPeriod==='all') return null;
+  const days = chartPeriod==='week'?7:30;
+  const d=new Date(); d.setDate(d.getDate()-(days-1));
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
 function buildSeries(keys){
-  const sorted=[...records].sort((a,b)=>a.date<b.date?-1:1);
+  const cut=periodCutoff();
+  const sorted=[...records].filter(r=>cut==null||r.date>=cut).sort((a,b)=>a.date<b.date?-1:1);
   const labels=sorted.map(r=>fmtMD(r.date));
   const series=keys.map(k=>{ const e=EX.find(x=>x.k===k); return {color:e.color, name:e.short, pts:sorted.map(r=>vol(r.ex&&r.ex[k]))}; });
   return {labels, series};
@@ -594,19 +630,23 @@ function drawChart(elId, keys){
   const {labels,series}=buildSeries(keys);
   const el=document.getElementById(elId);
   const n=Math.max(labels.length,1);
-  const W=Math.max(320, n*70+80), H=240, padL=46, padR=18, padT=14, padB=34;
+  // コンテナ幅にフィットする固定viewBox（横スクロールを発生させない）
+  const W=360, H=240, padL=46, padR=18, padT=14, padB=34;
   let maxY=0; series.forEach(s=>s.pts.forEach(v=>{ if(v!=null&&v>maxY)maxY=v; }));
   maxY = maxY>0 ? Math.ceil(maxY/100)*100 : 100;
   const x=i=> n===1 ? padL+(W-padL-padR)/2 : padL + i*(W-padL-padR)/(n-1);
   const y=v=> padT + (H-padT-padB)*(1 - v/maxY);
-  let svg='<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" font-family="DM Mono, monospace">';
+  let svg='<svg width="100%" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto" font-family="DM Mono, monospace">';
   for(let g=0;g<=4;g++){ const val=maxY*g/4, yy=y(val);
     svg+='<line x1="'+padL+'" y1="'+yy+'" x2="'+(W-padR)+'" y2="'+yy+'" stroke="#999" stroke-width="1" stroke-dasharray="2 3"/>';
     svg+='<text x="'+(padL-6)+'" y="'+(yy+4)+'" font-size="9" text-anchor="end" fill="#1a1a1a">'+val+'</text>';
   }
   svg+='<line x1="'+padL+'" y1="'+padT+'" x2="'+padL+'" y2="'+(H-padB)+'" stroke="#1a1a1a" stroke-width="3"/>';
   svg+='<line x1="'+padL+'" y1="'+(H-padB)+'" x2="'+(W-padR)+'" y2="'+(H-padB)+'" stroke="#1a1a1a" stroke-width="3"/>';
-  labels.forEach((lb,i)=>{ svg+='<text x="'+x(i)+'" y="'+(H-padB+16)+'" font-size="9" text-anchor="middle" fill="#1a1a1a">'+lb+'</text>'; });
+  // x軸ラベルは最大8個程度に間引き（密集回避・末尾は必ず表示）
+  const maxLabels=8, step=Math.max(1,Math.ceil(labels.length/maxLabels));
+  labels.forEach((lb,i)=>{ if(labels.length>maxLabels && i%step!==0 && i!==labels.length-1) return;
+    svg+='<text x="'+x(i)+'" y="'+(H-padB+16)+'" font-size="9" text-anchor="middle" fill="#1a1a1a">'+lb+'</text>'; });
   series.forEach(s=>{
     let d='', started=false;
     s.pts.forEach((v,i)=>{ if(v==null)return; d+=(started?'L':'M')+x(i)+' '+y(v)+' '; started=true; });
@@ -627,6 +667,10 @@ function renderCharts(){
   legend('legendUpper',upper); drawChart('chartUpper',upper);
   legend('legendLeg',leg); drawChart('chartLeg',leg);
 }
+document.querySelectorAll('#chartPeriod .btn').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#chartPeriod .btn').forEach(x=>x.classList.remove('sel'));
+  b.classList.add('sel'); chartPeriod=b.dataset.period; renderCharts();
+});
 
 /* ===== 時間の可視化 ===== */
 function weekKeyMon(dateStr){ const d=new Date(dateStr); const dow=(d.getDay()+6)%7; d.setDate(d.getDate()-dow); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
