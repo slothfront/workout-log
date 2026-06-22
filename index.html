@@ -234,12 +234,9 @@ select:focus,input:focus{background:var(--yellow);}
         <button class="btn small sel" data-period="month">MONTH</button>
         <button class="btn small" data-period="all">ALL</button>
       </div>
-      <h2>Trend / Upper</h2>
-      <div class="legend" id="legendUpper"></div>
-      <div class="chart-wrap"><div class="chart-title">Upper body — 5 lifts</div><div id="chartUpper"></div></div>
-      <h2 style="margin-top:18px">Trend / Legs</h2>
-      <div class="legend" id="legendLeg"></div>
-      <div class="chart-wrap"><div class="chart-title">Goblet squat volume</div><div id="chartLeg"></div></div>
+      <h2>Trend</h2>
+      <div class="legend" id="legendAll"></div>
+      <div class="chart-wrap"><div class="chart-title">Volume — L axis: upper · R axis: squat (dashed)</div><div id="chartAll"></div></div>
     </div>
   </div>
 
@@ -649,46 +646,54 @@ function buildSeries(keys){
   const series=keys.map(k=>{ const e=EX.find(x=>x.k===k); return {color:e.color, name:e.short, pts:sorted.map(r=>vol(r.ex&&r.ex[k]))}; });
   return {labels, series};
 }
-function drawChart(elId, keys){
-  const {labels,series}=buildSeries(keys);
+/* 2軸グラフ：左軸=上半身(leftKeys) / 右軸=脚(rightKeys, 破線)。縦は従来比1.5倍(H=360) */
+function drawDualChart(elId, leftKeys, rightKeys){
+  const allKeys=[...leftKeys,...rightKeys];
+  const {labels,series}=buildSeries(allKeys);
   const el=document.getElementById(elId);
+  if(labels.length===0){ el.innerHTML='<p style="color:var(--text-secondary);font-size:12px;padding:20px">No records yet.</p>'; return; }
+  const leftSeries=series.slice(0,leftKeys.length);
+  const rightSeries=series.slice(leftKeys.length);
+  const rightColor=(rightSeries[0]&&rightSeries[0].color)||'#70AD47';
   const n=Math.max(labels.length,1);
-  // コンテナ幅にフィットする固定viewBox（横スクロールを発生させない）
-  const W=360, H=240, padL=46, padR=18, padT=14, padB=34;
-  let maxY=0; series.forEach(s=>s.pts.forEach(v=>{ if(v!=null&&v>maxY)maxY=v; }));
-  maxY = maxY>0 ? Math.ceil(maxY/100)*100 : 100;
+  // コンテナ幅にフィットする固定viewBox（横スクロールを発生させない）／高さを1.5倍に
+  const W=360, H=360, padL=46, padR=46, padT=14, padB=34;
+  function niceMax(ss){ let m=0; ss.forEach(s=>s.pts.forEach(v=>{ if(v!=null&&v>m)m=v; })); return m>0?Math.ceil(m/100)*100:100; }
+  const maxL=niceMax(leftSeries), maxR=niceMax(rightSeries);
   const x=i=> n===1 ? padL+(W-padL-padR)/2 : padL + i*(W-padL-padR)/(n-1);
-  const y=v=> padT + (H-padT-padB)*(1 - v/maxY);
+  const yL=v=> padT + (H-padT-padB)*(1 - v/maxL);
+  const yR=v=> padT + (H-padT-padB)*(1 - v/maxR);
   let svg='<svg width="100%" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto" font-family="DM Mono, monospace">';
-  for(let g=0;g<=4;g++){ const val=maxY*g/4, yy=y(val);
+  for(let g=0;g<=4;g++){ const yy=padT+(H-padT-padB)*(1-g/4);
     svg+='<line x1="'+padL+'" y1="'+yy+'" x2="'+(W-padR)+'" y2="'+yy+'" stroke="#999" stroke-width="1" stroke-dasharray="2 3"/>';
-    svg+='<text x="'+(padL-6)+'" y="'+(yy+4)+'" font-size="9" text-anchor="end" fill="#1a1a1a">'+val+'</text>';
+    svg+='<text x="'+(padL-6)+'" y="'+(yy+4)+'" font-size="9" text-anchor="end" fill="#1a1a1a">'+(maxL*g/4)+'</text>';
+    svg+='<text x="'+(W-padR+6)+'" y="'+(yy+4)+'" font-size="9" text-anchor="start" fill="'+rightColor+'">'+(maxR*g/4)+'</text>';
   }
   svg+='<line x1="'+padL+'" y1="'+padT+'" x2="'+padL+'" y2="'+(H-padB)+'" stroke="#1a1a1a" stroke-width="3"/>';
+  svg+='<line x1="'+(W-padR)+'" y1="'+padT+'" x2="'+(W-padR)+'" y2="'+(H-padB)+'" stroke="'+rightColor+'" stroke-width="3"/>';
   svg+='<line x1="'+padL+'" y1="'+(H-padB)+'" x2="'+(W-padR)+'" y2="'+(H-padB)+'" stroke="#1a1a1a" stroke-width="3"/>';
   // x軸ラベルは最大8個程度に間引き（密集回避・末尾は必ず表示）
   const maxLabels=8, step=Math.max(1,Math.ceil(labels.length/maxLabels));
   labels.forEach((lb,i)=>{ if(labels.length>maxLabels && i%step!==0 && i!==labels.length-1) return;
     svg+='<text x="'+x(i)+'" y="'+(H-padB+16)+'" font-size="9" text-anchor="middle" fill="#1a1a1a">'+lb+'</text>'; });
-  series.forEach(s=>{
+  function plot(s,yfn,dash){
     let d='', started=false;
-    s.pts.forEach((v,i)=>{ if(v==null)return; d+=(started?'L':'M')+x(i)+' '+y(v)+' '; started=true; });
-    if(d) svg+='<path d="'+d+'" fill="none" stroke="'+s.color+'" stroke-width="3.5" stroke-linejoin="round"/>';
-    s.pts.forEach((v,i)=>{ if(v==null)return; svg+='<circle cx="'+x(i)+'" cy="'+y(v)+'" r="4.5" fill="'+s.color+'" stroke="#1a1a1a" stroke-width="1.5"/>'; });
-  });
+    s.pts.forEach((v,i)=>{ if(v==null)return; d+=(started?'L':'M')+x(i)+' '+yfn(v)+' '; started=true; });
+    if(d) svg+='<path d="'+d+'" fill="none" stroke="'+s.color+'" stroke-width="3.5" stroke-linejoin="round"'+(dash?' stroke-dasharray="7 4"':'')+'/>';
+    s.pts.forEach((v,i)=>{ if(v==null)return; svg+='<circle cx="'+x(i)+'" cy="'+yfn(v)+'" r="4.5" fill="'+s.color+'" stroke="#1a1a1a" stroke-width="1.5"/>'; });
+  }
+  leftSeries.forEach(s=>plot(s,yL,false));
+  rightSeries.forEach(s=>plot(s,yR,true));
   svg+='</svg>';
-  if(labels.length===0) svg='<p style="color:var(--text-secondary);font-size:12px;padding:20px">No records yet.</p>';
   el.innerHTML=svg;
-}
-function legend(elId, keys){
-  const el=document.getElementById(elId); el.innerHTML='';
-  keys.forEach(k=>{ const e=EX.find(x=>x.k===k); const s=document.createElement('span'); s.innerHTML='<i style="background:'+e.color+'"></i>'+e.short; el.appendChild(s); });
 }
 function renderCharts(){
   const upper=EX.filter(e=>e.group==='upper').map(e=>e.k);
   const leg=EX.filter(e=>e.group==='leg').map(e=>e.k);
-  legend('legendUpper',upper); drawChart('chartUpper',upper);
-  legend('legendLeg',leg); drawChart('chartLeg',leg);
+  const lg=document.getElementById('legendAll'); lg.innerHTML='';
+  upper.forEach(k=>{ const e=EX.find(x=>x.k===k); const s=document.createElement('span'); s.innerHTML='<i style="background:'+e.color+'"></i>'+e.short; lg.appendChild(s); });
+  leg.forEach(k=>{ const e=EX.find(x=>x.k===k); const s=document.createElement('span'); s.innerHTML='<i style="background:repeating-linear-gradient(90deg,'+e.color+' 0 4px,transparent 4px 7px)"></i>'+e.short+' (R)'; lg.appendChild(s); });
+  drawDualChart('chartAll',upper,leg);
 }
 document.querySelectorAll('#chartPeriod .btn').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#chartPeriod .btn').forEach(x=>x.classList.remove('sel'));
