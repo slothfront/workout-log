@@ -409,6 +409,7 @@ function renderTime(){
   const dur = durationMin(cur.start,cur.end);
   document.getElementById('timeDisplay').innerHTML =
     'START <b>'+(cur.start||'--:--')+'</b> &nbsp; END <b>'+(cur.end||'--:--')+'</b> &nbsp; TIME <b>'+(dur!=null?dur+'min':'--')+'</b>';
+  updateFloat();
 }
 document.getElementById('btnStart').onclick=()=>{ cur.start=nowHM(); cur.end=null; renderTime(); toast('START '+cur.start); };
 document.getElementById('btnFinish').onclick=()=>{ if(!cur.start){toast('START FIRST');return;} cur.end=nowHM(); renderTime(); toast('FINISHED '+cur.end); };
@@ -416,13 +417,14 @@ document.getElementById('btnFinish').onclick=()=>{ if(!cur.start){toast('START F
 /* タイマー */
 let tDur=90, tLeft=90, tId=null;
 function fmtT(s){ return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
-/* スクロール中も見えるフローティングタイマー：作動中（実行中 or 一時停止で途中）に表示 */
+/* セッション進行中（START済み・未FINISH）かどうか。種目中もずっと表示しておくための判定 */
+function sessionActive(){ return !!(cur && cur.start && !cur.end); }
+/* スクロール中も見えるフローティングレストタイマー：セッションのSTART〜FINISHの間つねに表示 */
 function updateFloat(){
   const f=document.getElementById('floatTimer');
   document.getElementById('floatTime').textContent=fmtT(tLeft);
   document.getElementById('floatToggle').textContent = tId ? '❚❚' : '▶';
-  const active = tId!=null || (tLeft>0 && tLeft<tDur);
-  f.classList.toggle('show', active);
+  f.classList.toggle('show', sessionActive());
 }
 function renderTimer(){ document.getElementById('timerCount').textContent=fmtT(tLeft); updateFloat(); }
 document.querySelectorAll('.timer-presets .btn').forEach(b=>b.onclick=()=>{
