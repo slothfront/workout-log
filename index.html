@@ -122,6 +122,13 @@ select:focus,input:focus{background:var(--yellow);}
 .team-footer .team-name{font-family:'Archivo Black',sans-serif;font-weight:900;font-size:clamp(18px,5.5vw,32px);letter-spacing:.04em;text-transform:uppercase;color:var(--black);display:inline-block;white-space:nowrap;background:var(--yellow);padding:6px 16px;border:4px solid var(--black);box-shadow:6px 6px 0 var(--red);}
 .team-footer .team-sub{font-family:'DM Mono',monospace;font-size:clamp(9px,2.2vw,11px);letter-spacing:.32em;color:var(--black);text-transform:uppercase;margin-top:16px;font-weight:500;}
 
+.float-timer{position:fixed;right:14px;bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:1500;display:flex;align-items:center;gap:10px;background:var(--yellow);border:3px solid var(--black);box-shadow:4px 4px 0 var(--black);padding:8px 10px 8px 12px;transform:translateY(160px);transition:transform .25s,background .15s;}
+.float-timer.show{transform:translateY(0);}
+.float-timer .float-label{font-family:'DM Mono',monospace;font-size:9px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;}
+.float-timer .float-time{font-family:'Archivo Black',sans-serif;font-size:26px;line-height:1;letter-spacing:-.02em;min-width:66px;text-align:center;}
+.float-timer.flash{background:var(--red);color:var(--paper);}
+.float-btn{border:2px solid var(--black);background:var(--paper);color:var(--black);font-family:'Archivo Black',sans-serif;font-size:13px;line-height:1;padding:7px 9px;cursor:pointer;transition:transform .1s,box-shadow .1s;box-shadow:2px 2px 0 var(--black);}
+.float-btn:active{transform:translate(2px,2px);box-shadow:0 0 0 var(--black);}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(120px);background:var(--black);color:var(--paper);font-family:'Archivo Black',sans-serif;font-size:12px;letter-spacing:.06em;text-transform:uppercase;padding:12px 20px;z-index:2000;transition:transform .25s;border:3px solid var(--black);box-shadow:4px 4px 0 var(--red);}
 .toast.show{transform:translateX(-50%) translateY(0);}
 .pr-overlay{position:fixed;inset:0;z-index:3000;display:none;align-items:center;justify-content:center;background:rgba(244,240,232,.55);}
@@ -224,8 +231,7 @@ select:focus,input:focus{background:var(--yellow);}
     </div>
     <div class="card">
       <div class="chart-period" id="chartPeriod">
-        <button class="btn small sel" data-period="week">WEEK</button>
-        <button class="btn small" data-period="month">MONTH</button>
+        <button class="btn small sel" data-period="month">MONTH</button>
         <button class="btn small" data-period="all">ALL</button>
       </div>
       <h2>Trend / Upper</h2>
@@ -275,6 +281,12 @@ select:focus,input:focus{background:var(--yellow);}
   </div>
 </div>
 
+<div class="float-timer" id="floatTimer">
+  <span class="float-label">REST</span>
+  <span class="float-time" id="floatTime">1:30</span>
+  <button class="float-btn" id="floatToggle" title="start / pause">▶</button>
+  <button class="float-btn" id="floatReset" title="reset">↺</button>
+</div>
 <div class="toast" id="toast"></div>
 <div class="pr-overlay" id="prOverlay">
   <div class="pr-card">
@@ -407,7 +419,15 @@ document.getElementById('btnFinish').onclick=()=>{ if(!cur.start){toast('START F
 /* タイマー */
 let tDur=90, tLeft=90, tId=null;
 function fmtT(s){ return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
-function renderTimer(){ document.getElementById('timerCount').textContent=fmtT(tLeft); }
+/* スクロール中も見えるフローティングタイマー：作動中（実行中 or 一時停止で途中）に表示 */
+function updateFloat(){
+  const f=document.getElementById('floatTimer');
+  document.getElementById('floatTime').textContent=fmtT(tLeft);
+  document.getElementById('floatToggle').textContent = tId ? '❚❚' : '▶';
+  const active = tId!=null || (tLeft>0 && tLeft<tDur);
+  f.classList.toggle('show', active);
+}
+function renderTimer(){ document.getElementById('timerCount').textContent=fmtT(tLeft); updateFloat(); }
 document.querySelectorAll('.timer-presets .btn').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.timer-presets .btn').forEach(x=>x.classList.remove('sel'));
   b.classList.add('sel'); tDur=+b.dataset.sec; tLeft=tDur; stopTimer(); renderTimer();
@@ -415,17 +435,20 @@ document.querySelectorAll('.timer-presets .btn').forEach(b=>b.onclick=()=>{
 function tick(){ tLeft--; if(tLeft<=0){ stopTimer(); tLeft=0; renderTimer(); alarm(); return; } renderTimer(); }
 function alarm(){
   const el=document.getElementById('timerCount'); el.classList.add('flash'); setTimeout(()=>el.classList.remove('flash'),1500);
+  const fl=document.getElementById('floatTimer'); fl.classList.add('flash'); setTimeout(()=>fl.classList.remove('flash'),1500);
   try{ const ctx=new (window.AudioContext||window.webkitAudioContext)();
     [0,0.25,0.5].forEach(d=>{ const o=ctx.createOscillator(),g=ctx.createGain(); o.connect(g);g.connect(ctx.destination); o.frequency.value=880; g.gain.setValueAtTime(.25,ctx.currentTime+d); g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+d+.2); o.start(ctx.currentTime+d); o.stop(ctx.currentTime+d+.2); });
   }catch(e){}
   if(navigator.vibrate) navigator.vibrate([250,120,250]);
   toast('REST DONE!');
 }
-function startTimer(){ if(tId)return; if(tLeft<=0)tLeft=tDur; tId=setInterval(tick,1000); }
-function stopTimer(){ if(tId){clearInterval(tId);tId=null;} }
+function startTimer(){ if(tId)return; if(tLeft<=0)tLeft=tDur; tId=setInterval(tick,1000); updateFloat(); }
+function stopTimer(){ if(tId){clearInterval(tId);tId=null;} updateFloat(); }
 document.getElementById('btnTimerStart').onclick=startTimer;
 document.getElementById('btnTimerPause').onclick=stopTimer;
 document.getElementById('btnTimerReset').onclick=()=>{ stopTimer(); tLeft=tDur; renderTimer(); };
+document.getElementById('floatToggle').onclick=()=>{ if(tId) stopTimer(); else startTimer(); };
+document.getElementById('floatReset').onclick=()=>{ stopTimer(); tLeft=tDur; renderTimer(); };
 
 /* ===== 目標到達合計回数（max volを超えるのに必要な3セット合計） ===== */
 function totalTarget(k,w){ const mx=maxVol(k); if(w==null||mx<=0) return null; return Math.floor(mx/w)+1; }
@@ -612,7 +635,7 @@ function renderTarget(){
 }
 
 /* グラフ */
-let chartPeriod='week';   // week=直近7日 / month=直近30日 / all=全期間
+let chartPeriod='month';   // month=直近30日 / all=全期間（週単位は日々変化しないため廃止）
 function periodCutoff(){
   if(chartPeriod==='all') return null;
   const days = chartPeriod==='week'?7:30;
